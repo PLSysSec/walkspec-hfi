@@ -29,8 +29,8 @@ def __main__():
         SPEC06_DIR = '/spec'
         GEM5_DIR = '/gem5'
         CONFIG_NAME = 'simConfig'
-        SCRIPT_DIR = '/mywench/spec_scripts'
-        EXTRA_COMP_FILES = ['/mywench/hfi_check.c']
+        SCRIPT_DIR = '/walkspec/spec_scripts'
+        EXTRA_COMP_FILES = ['/walkspec/hfi_check.c']
     else:
         # get the SPEC06 directory from the user
         SPEC06_DIR = input("Enter the SPEC06 directory's absolute path: ")
