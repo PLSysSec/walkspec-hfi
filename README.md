@@ -1,4 +1,4 @@
-1. Open the dockerfile `gem5-plus` in this directory with the following volumes:
+1. Open the dockerfile `gem5-plus` (stock 20.04+deps gem5 image, but with clang, wabt, and cmake installed via apt) with the following volumes:
     - <HW_ISOL_GEM5_DIR>:/gem5
     - <WALKSPEC_DIR>:/walkspec
     - <RLBOX_WASM2C_SANDBOX_DIR>:/rlboxbox
