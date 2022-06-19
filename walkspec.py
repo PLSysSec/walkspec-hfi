@@ -17,18 +17,31 @@ import time
 
 def make_gem5_cmd(gem5_dir, benchmark, workload, args, config):
     # TODO: tune this
-    return f'{gem5_dir}/build/X86/gem5.opt --outdir=run_{benchmark}_{config}  \
-{gem5_dir}/configs/example/se.py -c {workload} -o "{args}" --mem-size=8GB'
-#--cpu-type=DerivO3CPU --caches --l2cache --l1d_size=32kB --l1i_size=32kB'
+    return f'{gem5_dir}/build/X86/gem5.fast \
+--outdir={gem5_dir}/run_{benchmark}_{config}  \
+{gem5_dir}/configs/example/se.py -c {workload} -o "{args}" --mem-size=4GB \
+-I 50000000000'
 
 def __main__():
     # ask the user if they want to use default values
-    if input("Use Joey's default values? (y/n) ") == "y":
+    print("""\
+    Default values:
+        SPEC06:         /spec
+        gem5:           /gem5
+        config name:    wasmSimConfig
+        scripts dir:    /walkspec/spec_scripts
+        extra files:    [/walkspec/hfi_check.c]
+    
+    Make sure you have the wasi-sdk set up at /wasi-sdk.
+    
+    ------------
+""")
+    if input("Use default values? (y/n) ") == "y":
         # these are joey's docker img default values
-        # use at your own risk!!!
         SPEC06_DIR = '/spec'
         GEM5_DIR = '/gem5'
-        CONFIG_NAME = 'simConfig'
+        #CONFIG_NAME = 'simConfig'
+        CONFIG_NAME = 'wasmSimConfig'
         SCRIPT_DIR = '/walkspec/spec_scripts'
         EXTRA_COMP_FILES = ['/walkspec/hfi_check.c']
     else:
@@ -44,7 +57,7 @@ def __main__():
         EXTRA_COMP_FILES = []
         while True:
             extra_file = input("Enter an extra file (absolute path) to compile (or \
-    a blank line to continue):")
+a blank line to continue):")
             if extra_file == "":
                 break
             EXTRA_COMP_FILES.append(extra_file)
@@ -81,10 +94,9 @@ def __main__():
         # do a fake run to get the runspec output
         run_log = run(
             f'. ./shrc && go {benchmark} && runspec --config=simConfig --loose \
-    --fake --iterations=1 {benchmark}', shell=True, capture_output=True 
+--fake --iterations=1 {benchmark}', shell=True, capture_output=True 
     ).stdout.decode('utf-8')
         # in that output, we want to run everything labelled a "fake command from make"
-        #print(run_log)
         BUILD_CMDS = []
         INVOKE_CMDS = ''  # we're gonna split this differently
         is_build_cmd = False
@@ -121,23 +133,21 @@ def __main__():
 
         # the binary name is the very last thing in BUILD_CMDS[-1]
         BINARY_NAME = BUILD_CMDS[-1].split(' ')[-1]
-        #input(BINARY_NAME)
         
         # get the benchmark's build directory
         ALL_BUILDS_DIR = run(f'. ./shrc && go {benchmark} build', shell=True,
     capture_output=True).stdout.decode('utf-8').strip()
         # climb into the fake-built directory -- it's the most recently created
         BUILD_DIR = max(filter(pathlib.PosixPath.is_dir,
-            pathlib.Path(ALL_BUILDS_DIR).iterdir()), key=os.path.getctime)
+ pathlib.Path(ALL_BUILDS_DIR).iterdir()), key=os.path.getctime)
         os.chdir(BUILD_DIR)
 
         # since we're fake building, the invoke commands have to be changed a bit
-        #print(INVOKE_CMDS)
-        #input('\n')
         INVOKE_CMDS = re.sub(r'\.\./run_\S+?\s', f'{BUILD_DIR}/{BINARY_NAME} ',
     INVOKE_CMDS)
-        #print('\n\n')
-        #input(INVOKE_CMDS)
+
+        # to avoid weird coherency issues, remove the binary if it's present 
+        os.system(f'rm -f {BINARY_NAME}')
 
         # now, from within the build directory, run the build commands
         # this is the same as running make build (but nothing else in the makefile)
@@ -145,11 +155,16 @@ def __main__():
         # extra files (like the HFI one) there
         for cmd in BUILD_CMDS[:-1]:
             os.system(cmd)
-        os.system(BUILD_CMDS[-1] + ' ' + ' '.join(EXTRA_COMP_FILES))
+        last_build_cmd = f"{BUILD_CMDS[-1]} {' '.join(EXTRA_COMP_FILES)}"
+        # do normal compilation (with whatever's in the config)
+        os.system(last_build_cmd)
+
         # check that the binary was actually built
         binary_name = BUILD_CMDS[-1].strip().split(' ')[-1]
         if os.path.isfile(binary_name):
             successes.append(benchmark)
+
+        # --- 
 
         ### NATIVE SCRIPT GENERATION ###
         """

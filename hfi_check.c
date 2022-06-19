@@ -11,6 +11,7 @@ void entry_wrapper() {
   if (getenv("HFI")) {
     //printf("HFI!\n");
     hfi_enter_sandbox();
+    asm volatile("mfence":::"memory");
   } else {
     //printf("No HFI.\n");
   }
@@ -19,6 +20,7 @@ void entry_wrapper() {
 void exit_wrapper() {
   if (getenv("HFI")) {
     //printf("Still HFI!\n");
+    asm volatile("mfence":::"memory");
     hfi_exit_sandbox();
   } else {
     //printf("Still no HFI.\n");
