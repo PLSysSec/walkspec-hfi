@@ -19,7 +19,8 @@ Everything here is for UCSD's HFI project, so a lot of what `walkspec.py` does a
     - <WASI-SDK_DIR>:/wasi-sdk
     - <WABT_DIR>:/wabt
 3. From within the dockerfile, install SPEC06 to /spec. (NOTE: This will probably make it so `runspec` only works if SPEC06 is installed at /spec)
-4. Run `python /walkspec/walkspec.py`. This will try to build all C-only SPEC benchmarks and make scripts to run them in and out of gem5, with both clang and wasi-clang. Check the `log` files in `/walkspec/spec_scripts` to see which ones built successfully.
+4. Copy `/walkspec/simConfig.cfg` and `/walkspec/wasmSimConfig.cfg` to `/spec/config/`.
+5. Run `python /walkspec/walkspec.py`. This will try to build all C-only SPEC benchmarks and make scripts to run them in and out of gem5, with both clang and wasi-clang. Check the `log` files in `/walkspec/spec_scripts` to see which ones built successfully.
 
 `{CONFIG}_401_native.sh` calls the compiled 401.bzip2 with the first command used by specinvoke. To make native execution use HFI (not sure why you'd want this), run `export HFI='1'` before running the script; to disable native HFI use `unset HFI`.
 
