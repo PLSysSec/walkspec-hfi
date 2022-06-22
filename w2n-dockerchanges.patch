@@ -1,0 +1,4 @@
+5c5
+< wasm2c "$1" -o wasi-app.c
+---
+> /wabt/bin/wasm2c "$1" -o wasi-app.c

@@ -22,65 +22,27 @@ def make_gem5_cmd(gem5_dir, benchmark, workload, args, config):
 {gem5_dir}/configs/example/se.py -c {workload} -o "{args}" --mem-size=4GB \
 -I 50000000000'
 
-def __main__():
-    # ask the user if they want to use default values
-    print("""\
-    Default values:
-        SPEC06:         /spec
-        gem5:           /gem5
-        config name:    wasmSimConfig
-        scripts dir:    /walkspec/spec_scripts
-        extra files:    [/walkspec/hfi_check.c]
-    
-    Make sure you have the wasi-sdk set up at /wasi-sdk.
-    
-    ------------
-""")
-    if input("Use default values? (y/n) ") == "y":
-        # these are joey's docker img default values
-        SPEC06_DIR = '/spec'
-        GEM5_DIR = '/gem5'
-        #CONFIG_NAME = 'simConfig'
-        CONFIG_NAME = 'wasmSimConfig'
-        SCRIPT_DIR = '/walkspec/spec_scripts'
-        EXTRA_COMP_FILES = ['/walkspec/hfi_check.c']
-    else:
-        # get the SPEC06 directory from the user
-        SPEC06_DIR = input("Enter the SPEC06 directory's absolute path: ")
-        # get the gem5 directory from the user
-        GEM5_DIR = input("Enter the gem5 directory's absolute path: ")
-        # get the config name from the user
-        CONFIG_NAME = input("Enter your config name: ")
-        # get the script output directory from the user
-        SCRIPT_DIR = input("Enter the directory to save scripts: ")
-        # get any extra compilation files from the user
-        EXTRA_COMP_FILES = []
-        while True:
-            extra_file = input("Enter an extra file (absolute path) to compile (or \
-a blank line to continue):")
-            if extra_file == "":
-                break
-            EXTRA_COMP_FILES.append(extra_file)
-
+def build_bmks_and_make_scripts(CONFIG, EXTRA_COMP_FILES):
+    SPEC06_DIR = '/spec'
+    GEM5_DIR = '/gem5'
+    SCRIPT_DIR = '/walkspec/spec_scripts'
     SHEBANG = "#!/bin/bash\n"  # sorry zsh lovers
+
     start_time = time.ctime()
     # from the config file, get the line which starts with 'ext':
     # this is part of the build and run directories
     os.chdir(SPEC06_DIR)
-    with open(f'config/{CONFIG_NAME}.cfg', 'r') as f:
+    with open(f'config/{CONFIG}.cfg', 'r') as f:
         for line in f:
             if line.startswith('ext'):
                 EXT = line.split('=')[1].strip()
+                #input(f"Config {CONFIG} has extension {EXT}.")
                 break
 
     # here's all of the C-only benchmarks
     C_BENCHMARKS = ['400', '401', '403', '429', '445', '456', '458', '462', '464', \
                     '433', '470', '482']
 
-    """
-    currently working: 
-    everything except 400.perlbench!
-    """
     # log successful builds, to be displayed at the end
     successes = []
 
@@ -89,11 +51,10 @@ a blank line to continue):")
     HFI_ENV = f'{SCRIPT_DIR}/hfi_env.txt'
 
     for benchmark in C_BENCHMARKS:
-        if benchmark == '400': continue  # perl doesn't work
         ### BENCHMARK COMPILATION ###
         # do a fake run to get the runspec output
         run_log = run(
-            f'. ./shrc && go {benchmark} && runspec --config=simConfig --loose \
+            f'. ./shrc && go {benchmark} && runspec --config={CONFIG} --loose \
 --fake --iterations=1 {benchmark}', shell=True, capture_output=True 
     ).stdout.decode('utf-8')
         # in that output, we want to run everything labelled a "fake command from make"
@@ -163,10 +124,25 @@ a blank line to continue):")
         binary_name = BUILD_CMDS[-1].strip().split(' ')[-1]
         if os.path.isfile(binary_name):
             successes.append(benchmark)
+            # if using wasmSimConfig, invoke wasm2native
+            if CONFIG == 'wasmSimConfig':
+                os.chdir("/wasm2native")
+                os.system("rm -rf src/wasi-app.c src/wasi-app.h")
+                print(f'CC=clang ./build.sh {BUILD_DIR}/{BINARY_NAME}')
+                os.system(f"CC=clang ./build.sh {BUILD_DIR}/{BINARY_NAME}")
+                # TODO: modify build.sh to use a limited version of w2c in HFI mode
+                if f"{BINARY_NAME}.elf" in os.listdir():
+                    os.system(f"mv {BUILD_DIR}/{BINARY_NAME} {BUILD_DIR}/{BINARY_NAME}.wasm")
+                    os.system(f"mv /wasm2native/{BINARY_NAME}.elf {BUILD_DIR}/{BINARY_NAME}")
+                else:
+                    # whoops, it failed!
+                    successes.remove(benchmark)
 
         # --- 
 
         ### NATIVE SCRIPT GENERATION ###
+        # (just use this for a sanity check)
+
         """
         Benchmark invocation looks like this:
 
@@ -192,35 +168,35 @@ a blank line to continue):")
             with open(f'{SCRIPT_DIR}/{benchmark}_native.sh', 'w') as f:
                 f.write(SHEBANG)
                 f.write(FIRST_INVOKE)
-            os.system(f'chmod +x {SCRIPT_DIR}/{benchmark}_native.sh')
+            os.system(f'chmod +x {SCRIPT_DIR}/{CONFIG}_{benchmark}_native.sh')
             ### GEM5 SCRIPT GENERATION ###
             LAST_CMD_LOC = FIRST_INVOKE[:-1].rfind('\n')
             LAST_CMD = FIRST_INVOKE[LAST_CMD_LOC+1:]
             WORKLOAD = LAST_CMD.split(' ')[0]
             WORKLOAD_ARGS = ' '.join(LAST_CMD.strip().split(' ')[1:])
-            with open(f'{SCRIPT_DIR}/{benchmark}_gem5_noHFI.sh', 'w') as f:
+            with open(f'{SCRIPT_DIR}/{CONFIG}_{benchmark}_gem5_noHFI.sh', 'w') as f:
                 f.write(SHEBANG)
                 f.write(FIRST_INVOKE[:LAST_CMD_LOC] + '\n')
                 f.write(make_gem5_cmd(GEM5_DIR, benchmark, WORKLOAD, 
                     WORKLOAD_ARGS, "noHFI") + "\n")
-            os.system(f'chmod +x {SCRIPT_DIR}/{benchmark}_gem5_noHFI.sh')
-            with open(f'{SCRIPT_DIR}/{benchmark}_gem5_HFI.sh', 'w') as f:
+            os.system(f'chmod +x {SCRIPT_DIR}/{CONFIG}_{benchmark}_gem5_noHFI.sh')
+            with open(f'{SCRIPT_DIR}/{CONFIG}_{benchmark}_gem5_HFI.sh', 'w') as f:
                 f.write(SHEBANG)
                 f.write(FIRST_INVOKE[:LAST_CMD_LOC] + '\n')
                 f.write(make_gem5_cmd(GEM5_DIR, benchmark, WORKLOAD, 
                     WORKLOAD_ARGS, "HFI") + f" --env={HFI_ENV}\n")
-            os.system(f'chmod +x {SCRIPT_DIR}/{benchmark}_gem5_HFI.sh')
+            os.system(f'chmod +x {SCRIPT_DIR}/{CONFIG}_{benchmark}_gem5_HFI.sh')
         # finally, return to the SPEC directory to prep for the next bmk
         os.chdir(SPEC06_DIR)
 
     ### LOGGING ###
     # write the successful benchmarks to a file
-    with open(f'{SCRIPT_DIR}/log.txt', 'w') as f:
+    with open(f'{SCRIPT_DIR}/{CONFIG}_log.txt', 'w') as f:
         f.write('Start time: ' + start_time + '\n')
         f.write('End time: ' + time.ctime() + '\n')
         f.write('\n')
         f.write('SPEC directory: ' + SPEC06_DIR + '\n')
-        f.write('Config name: ' + CONFIG_NAME + '\n')
+        f.write('Config name: ' + CONFIG + '\n')
         f.write('Script directory: ' + SCRIPT_DIR + '\n')
         f.write('Included extra files: ' + ' '.join(EXTRA_COMP_FILES) + '\n')
         f.write('\n')
@@ -231,7 +207,43 @@ a blank line to continue):")
         f.write('\n'.join(set(C_BENCHMARKS) - set(successes)))
         f.write('\n')
 
-    print("Done!")
     return
+
+
+def setup_wasm2native():
+    os.system("rm -rf /wasm2native/build")
+    os.chdir("/wasm2native")
+    # build the libraries once
+    os.system("./build-libs.sh")
+    if not os.path.isdir("/wasm2native/build"):
+        print("Failed to build wasm2native libraries?!")
+        exit()
+    # slightly change build.sh: use the version of w2c added to
+    # the docker image
+    os.system("patch /wasm2native/build.sh -i /walkspec/w2n-dockerchanges.patch")
+    return
+
+def __main__():
+    print("""\
+    Default values:
+        SPEC06:         /spec
+        gem5:           /gem5
+        scripts dir:    /walkspec/spec_scripts
+        extra files:    [/walkspec/hfi_check.c]
+
+    Make sure that you have the correct version of wabt in /wabt and that 
+    wasm2native (modified to use /wabt/bin/wasm2c) is in /wasm2native.
+    Builds will be done with both simConfig and wasmSimConfig.
+    ------------
+""")
+    setup_wasm2native()
+    os.chdir("/walkspec")
+    os.system("mkdir -p spec_scripts")
+    build_bmks_and_make_scripts("simConfig", ["/walkspec/hfi_check.c"])
+    # TODO: with hfi_check baked into the wasm2c'd benchmarks, w2c throws
+    # the error "expected valid block signature type" on the SPEC wasm files...
+    # ...so right now the wasm+HFI scripts do nothing special
+    build_bmks_and_make_scripts("wasmSimConfig", [])
+
 
 __main__()
