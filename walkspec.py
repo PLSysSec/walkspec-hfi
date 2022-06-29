@@ -42,6 +42,18 @@ def build_bmks_and_make_scripts(CONFIG, EXTRA_COMP_FILES):
     # here's all of the C-only benchmarks
     C_BENCHMARKS = ['400', '401', '403', '429', '445', '456', '458', '462', '464', \
                     '433', '470', '482']
+    
+    """
+    FIXME:
+	- 400 doesn't compile in normal clang, but also doesn't here.
+	- 403 needed setjmp, so I stubbed that; then it needed getcwd/getpagesize,
+	  so I stubbed the former and put the result of `getconf PAGESIZE`; and now
+	  stor-layout.c has an assertion failing...
+	- 456's toplev.c needs "system"? (haven't investigated much)
+        - 458 is failing due to some quirk of wasm2c's generated code: something of
+	  type void is being assigned a value
+	- 482 needs rlimit and I haven't stubbed that yet
+    """
 
     # log successful builds, to be displayed at the end
     successes = []
@@ -114,6 +126,8 @@ def build_bmks_and_make_scripts(CONFIG, EXTRA_COMP_FILES):
         # this is the same as running make build (but nothing else in the makefile)
         # in particular, the last command makes an executable; we can add in any
         # extra files (like the HFI one) there
+        
+        #input('\n'.join(BUILD_CMDS))
         for cmd in BUILD_CMDS[:-1]:
             os.system(cmd)
         last_build_cmd = f"{BUILD_CMDS[-1]} {' '.join(EXTRA_COMP_FILES)}"
@@ -165,7 +179,7 @@ def build_bmks_and_make_scripts(CONFIG, EXTRA_COMP_FILES):
             # we don't need that
             FIRST_INVOKE = FIRST_INVOKE[:FIRST_INVOKE.rfind(' > ')] + '\n'
             ### NATIVE SCRIPT GENERATION ###
-            with open(f'{SCRIPT_DIR}/{benchmark}_native.sh', 'w') as f:
+            with open(f'{SCRIPT_DIR}/{CONFIG}_{benchmark}_native.sh', 'w') as f:
                 f.write(SHEBANG)
                 f.write(FIRST_INVOKE)
             os.system(f'chmod +x {SCRIPT_DIR}/{CONFIG}_{benchmark}_native.sh')
@@ -219,8 +233,9 @@ def setup_wasm2native():
         print("Failed to build wasm2native libraries?!")
         exit()
     # slightly change build.sh: use the version of w2c added to
-    # the docker image
-    os.system("patch /wasm2native/build.sh -i /walkspec/w2n-dockerchanges.patch")
+    # the docker image, and incorporate hfi_check.c
+    os.system("cp /walkspec/hfi_check.c /wasm2native/src/hfi_check.c")
+    os.system("patch -N /wasm2native/build.sh -i /walkspec/hfi-w2n.patch")
     return
 
 def __main__():
@@ -240,9 +255,7 @@ def __main__():
     os.chdir("/walkspec")
     os.system("mkdir -p spec_scripts")
     build_bmks_and_make_scripts("simConfig", ["/walkspec/hfi_check.c"])
-    # TODO: with hfi_check baked into the wasm2c'd benchmarks, w2c throws
-    # the error "expected valid block signature type" on the SPEC wasm files...
-    # ...so right now the wasm+HFI scripts do nothing special
+    # wasm2native incorporates hfi_check.c into output binaries
     build_bmks_and_make_scripts("wasmSimConfig", [])
 
 

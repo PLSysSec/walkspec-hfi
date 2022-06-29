@@ -1,0 +1,8 @@
+5c5
+< wasm2c "$1" -o wasi-app.c
+---
+> /wabt/bin/wasm2c "$1" -o wasi-app.c
+9c9
+< SRCS="src/wasi-app.c src/wasi-main.c src/wasm-rt-impl.c"
+---
+> SRCS="src/wasi-app.c src/wasi-main.c src/wasm-rt-impl.c src/hfi_check.c"
