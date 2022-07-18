@@ -5,4 +5,4 @@
 9c9
 < SRCS="src/wasi-app.c src/wasi-main.c src/wasm-rt-impl.c"
 ---
-> SRCS="src/wasi-app.c src/wasi-main.c src/wasm-rt-impl.c src/hfi_check.c"
+> SRCS="src/wasi-app.c src/wasi-main.c src/wasm-rt-impl.c src/hfi_check.c src/hfi.S"

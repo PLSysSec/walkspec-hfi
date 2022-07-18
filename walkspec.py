@@ -14,13 +14,18 @@ import pathlib
 import re
 from subprocess import run, DEVNULL, PIPE
 import time
+import sys
 
 def make_gem5_cmd(gem5_dir, benchmark, workload, args, config):
     # TODO: tune this
-    return f'{gem5_dir}/build/X86/gem5.fast \
+    if args[0] == "<":
+        argsWithFlag = f"-i {args[1:]}"
+    else:
+        argsWithFlag = f"-o \"{args}\""
+    return f'{gem5_dir}/build/X86/gem5.opt --debug-flags=HFI \
 --outdir={gem5_dir}/run_{benchmark}_{config}  \
-{gem5_dir}/configs/example/se.py -c {workload} -o "{args}" --mem-size=4GB \
--I 50000000000'
+{gem5_dir}/configs/example/se.py -c {workload} {argsWithFlag} --mem-size=16GB \
+-I 50000000000 --cpu-type=DerivO3CPU --caches'
 
 def build_bmks_and_make_scripts(CONFIG, EXTRA_COMP_FILES):
     SPEC06_DIR = '/spec'
@@ -39,9 +44,10 @@ def build_bmks_and_make_scripts(CONFIG, EXTRA_COMP_FILES):
                 #input(f"Config {CONFIG} has extension {EXT}.")
                 break
 
-    # here's all of the C-only benchmarks
+    # benchmarks to try
     C_BENCHMARKS = ['400', '401', '403', '429', '445', '456', '458', '462', '464', \
-                    '433', '470', '482']
+                    '433', '470', '482', '444', '473']
+    #C_BENCHMARKS = ['444', '473'] 
     
     """
     FIXME:
@@ -132,6 +138,7 @@ def build_bmks_and_make_scripts(CONFIG, EXTRA_COMP_FILES):
             os.system(cmd)
         last_build_cmd = f"{BUILD_CMDS[-1]} {' '.join(EXTRA_COMP_FILES)}"
         # do normal compilation (with whatever's in the config)
+        print(last_build_cmd)
         os.system(last_build_cmd)
 
         # check that the binary was actually built
@@ -144,10 +151,21 @@ def build_bmks_and_make_scripts(CONFIG, EXTRA_COMP_FILES):
                 os.system("rm -rf src/wasi-app.c src/wasi-app.h")
                 print(f'CC=clang ./build.sh {BUILD_DIR}/{BINARY_NAME}')
                 os.system(f"CC=clang ./build.sh {BUILD_DIR}/{BINARY_NAME}")
-                # TODO: modify build.sh to use a limited version of w2c in HFI mode
+                
                 if f"{BINARY_NAME}.elf" in os.listdir():
                     os.system(f"mv {BUILD_DIR}/{BINARY_NAME} {BUILD_DIR}/{BINARY_NAME}.wasm")
                     os.system(f"mv /wasm2native/{BINARY_NAME}.elf {BUILD_DIR}/{BINARY_NAME}")
+                    # now try to do it again, but with bounds checks removed
+                    print('removing')
+                    os.system(f"rm -rf src/wasi-app.c src/wasi-app.h")
+                    print('building')
+                    os.system(f"CC=clang NOBOUND=1 ./build.sh {BUILD_DIR}/{BINARY_NAME}.wasm")
+                    if f"{BINARY_NAME}.elf" in os.listdir():
+                        print("built!")
+                        os.system(f"mv /wasm2native/{BINARY_NAME}.elf {BUILD_DIR}/{BINARY_NAME}-nobound")
+                        successes.append(benchmark+"-nobound")
+                    else:
+                        print("nobound failed...")
                 else:
                     # whoops, it failed!
                     successes.remove(benchmark)
@@ -197,6 +215,9 @@ def build_bmks_and_make_scripts(CONFIG, EXTRA_COMP_FILES):
             with open(f'{SCRIPT_DIR}/{CONFIG}_{benchmark}_gem5_HFI.sh', 'w') as f:
                 f.write(SHEBANG)
                 f.write(FIRST_INVOKE[:LAST_CMD_LOC] + '\n')
+                # if using wasmSimConfig, the HFI version should run {BENCHMARK}-nobound
+                if CONFIG == "wasmSimConfig":
+                    WORKLOAD += "-nobound"
                 f.write(make_gem5_cmd(GEM5_DIR, benchmark, WORKLOAD, 
                     WORKLOAD_ARGS, "HFI") + f" --env={HFI_ENV}\n")
             os.system(f'chmod +x {SCRIPT_DIR}/{CONFIG}_{benchmark}_gem5_HFI.sh')
@@ -234,7 +255,7 @@ def setup_wasm2native():
         exit()
     # slightly change build.sh: use the version of w2c added to
     # the docker image, and incorporate hfi_check.c
-    os.system("cp /walkspec/hfi_check.c /wasm2native/src/hfi_check.c")
+    os.system("cp -t /wasm2native/src /walkspec/hfi_check.c /walkspec/hfi.h /walkspec/hfi.S")
     os.system("patch -N /wasm2native/build.sh -i /walkspec/hfi-w2n.patch")
     return
 
@@ -244,17 +265,18 @@ def __main__():
         SPEC06:         /spec
         gem5:           /gem5
         scripts dir:    /walkspec/spec_scripts
-        extra files:    [/walkspec/hfi_check.c]
+        extra files:    [/walkspec/hfi_check.c, /walkspec/hfi.S]
 
     Make sure that you have the correct version of wabt in /wabt and that 
     wasm2native (modified to use /wabt/bin/wasm2c) is in /wasm2native.
     Builds will be done with both simConfig and wasmSimConfig.
     ------------
 """)
-    setup_wasm2native()
+    if "--now2n" not in sys.argv:
+        setup_wasm2native()
     os.chdir("/walkspec")
     os.system("mkdir -p spec_scripts")
-    build_bmks_and_make_scripts("simConfig", ["/walkspec/hfi_check.c"])
+    build_bmks_and_make_scripts("simConfig", ["/walkspec/hfi_check.c", "/walkspec/hfi.S", "-I/walkspec"])
     # wasm2native incorporates hfi_check.c into output binaries
     build_bmks_and_make_scripts("wasmSimConfig", [])
 
